@@ -42,6 +42,7 @@ This runs TypeScript in watch mode, copies renderer assets on change, and relaun
 2. **Start:** Adjust the desired watts and optional duration (seconds). Press **Start** to send the request-control, target-power, and start commands.
 3. **Adjust:** Use **+10 W** / **–10 W** to nudge the current target without interrupting the session.
 4. **Stop:** Hit **Stop** to send the FTMS stop/pause opcode. The trainer should fall back to freewheel mode.
+5. **Review:** The Activity Log card records connection and control events for quick troubleshooting.
 
 Telemetry updates appear in the **Live Telemetry** card. All power values are capped between 0 W and 2500 W for safety.
 

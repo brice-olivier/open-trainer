@@ -1,6 +1,9 @@
 const deviceInput = document.getElementById('deviceName') as HTMLInputElement | null;
 const connectButton = document.getElementById('connect') as HTMLButtonElement | null;
 const statusMessage = document.getElementById('statusMessage') as HTMLParagraphElement | null;
+const connectionStateLabel = document.getElementById('connectionState') as HTMLParagraphElement | null;
+const connectionDot = document.getElementById('connectionDot') as HTMLSpanElement | null;
+
 const targetInput = document.getElementById('targetWatts') as HTMLInputElement | null;
 const durationInput = document.getElementById('duration') as HTMLInputElement | null;
 const startButton = document.getElementById('start') as HTMLButtonElement | null;
@@ -8,9 +11,14 @@ const stopButton = document.getElementById('stop') as HTMLButtonElement | null;
 const increaseButton = document.getElementById('increase') as HTMLButtonElement | null;
 const decreaseButton = document.getElementById('decrease') as HTMLButtonElement | null;
 const currentTargetLabel = document.getElementById('currentTarget') as HTMLSpanElement | null;
-const telemetryPower = document.getElementById('telemetryPower') as HTMLSpanElement | null;
-const telemetryCadence = document.getElementById('telemetryCadence') as HTMLSpanElement | null;
-const telemetrySpeed = document.getElementById('telemetrySpeed') as HTMLSpanElement | null;
+
+const telemetryPower = document.getElementById('telemetryPower') as HTMLParagraphElement | null;
+const telemetryCadence = document.getElementById('telemetryCadence') as HTMLParagraphElement | null;
+const telemetrySpeed = document.getElementById('telemetrySpeed') as HTMLParagraphElement | null;
+
+const eventLog = document.getElementById('eventLog') as HTMLUListElement | null;
+
+let lastStatusMessage = '';
 
 const formatNumber = (value?: number, unit = ''): string => {
   if (value === undefined || Number.isNaN(value)) {
@@ -25,6 +33,46 @@ const setStatus = (text: string): void => {
   }
 };
 
+const setConnectionState = (stateLabel: string, stateClass: 'idle' | 'scanning' | 'connected' | 'running'): void => {
+  if (connectionStateLabel) {
+    connectionStateLabel.textContent = stateLabel;
+  }
+  if (!connectionDot) return;
+
+  connectionDot.className = 'status-dot';
+  switch (stateClass) {
+    case 'running':
+      connectionDot.classList.add('running');
+      break;
+    case 'connected':
+      connectionDot.classList.add('connected');
+      break;
+    case 'scanning':
+      connectionDot.classList.add('scanning');
+      break;
+    default:
+      connectionDot.classList.add('offline');
+      break;
+  }
+};
+
+const appendLog = (message: string): void => {
+  if (!eventLog) return;
+
+  if (eventLog.firstElementChild && eventLog.firstElementChild.classList.contains('placeholder')) {
+    eventLog.innerHTML = '';
+  }
+
+  const item = document.createElement('li');
+  item.textContent = `${new Date().toLocaleTimeString()} – ${message}`;
+  eventLog.prepend(item);
+
+  // keep the last 25 entries
+  while (eventLog.children.length > 25) {
+    eventLog.removeChild(eventLog.lastElementChild as Node);
+  }
+};
+
 const setTargetLabel = (watts: number): void => {
   if (currentTargetLabel) {
     currentTargetLabel.textContent = `Target: ${Math.round(watts)} W`;
@@ -34,29 +82,34 @@ const setTargetLabel = (watts: number): void => {
   }
 };
 
-const handleButtonState = (connected: boolean, running: boolean): void => {
+const updateButtons = (connected: boolean, running: boolean): void => {
   if (startButton) startButton.disabled = !connected;
   if (stopButton) stopButton.disabled = !connected;
   if (increaseButton) increaseButton.disabled = !connected;
   if (decreaseButton) decreaseButton.disabled = !connected;
   if (connectButton) connectButton.disabled = connected;
 
-  if (startButton) {
-    startButton.textContent = running ? 'Restart' : 'Start';
-  }
+  if (startButton) startButton.textContent = running ? 'Restart' : 'Start';
 };
 
 connectButton?.addEventListener('click', async () => {
   try {
-    connectButton.disabled = true;
-    setStatus('Connecting...');
+    if (connectButton) connectButton.disabled = true;
+    setConnectionState('Scanning', 'scanning');
+    setStatus('Connecting…');
+
     const filter = deviceInput?.value.trim();
     await window.ergApi.connect(filter ? { deviceName: filter } : {});
+
     setStatus('Connected. Control acquired.');
+    setConnectionState('Connected', 'connected');
+    appendLog('Connected to trainer');
   } catch (error) {
     console.error(error);
     setStatus(`Failed to connect: ${(error as Error).message}`);
-    connectButton.disabled = false;
+    setConnectionState('Idle', 'idle');
+    if (connectButton) connectButton.disabled = false;
+    appendLog(`Connection failed: ${(error as Error).message}`);
   }
 });
 
@@ -68,18 +121,22 @@ startButton?.addEventListener('click', async () => {
       targetWatts: watts,
       durationSeconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : undefined,
     });
+    appendLog(`ERG session started @ ${Math.round(watts)} W${durationSeconds ? ` for ${durationSeconds}s` : ''}`);
   } catch (error) {
     console.error(error);
     setStatus(`Failed to start session: ${(error as Error).message}`);
+    appendLog(`Failed to start session: ${(error as Error).message}`);
   }
 });
 
 stopButton?.addEventListener('click', async () => {
   try {
     await window.ergApi.stop();
+    appendLog('ERG session stopped');
   } catch (error) {
     console.error(error);
     setStatus(`Failed to stop: ${(error as Error).message}`);
+    appendLog(`Failed to stop: ${(error as Error).message}`);
   }
 });
 
@@ -88,10 +145,12 @@ increaseButton?.addEventListener('click', async () => {
     const watts = await window.ergApi.nudgeWatts(10);
     if (typeof watts === 'number') {
       setTargetLabel(watts);
+      appendLog(`Target increased to ${watts} W`);
     }
   } catch (error) {
     console.error(error);
     setStatus(`Failed to adjust watts: ${(error as Error).message}`);
+    appendLog(`Failed to adjust watts: ${(error as Error).message}`);
   }
 });
 
@@ -100,10 +159,12 @@ decreaseButton?.addEventListener('click', async () => {
     const watts = await window.ergApi.nudgeWatts(-10);
     if (typeof watts === 'number') {
       setTargetLabel(watts);
+      appendLog(`Target decreased to ${watts} W`);
     }
   } catch (error) {
     console.error(error);
     setStatus(`Failed to adjust watts: ${(error as Error).message}`);
+    appendLog(`Failed to adjust watts: ${(error as Error).message}`);
   }
 });
 
@@ -114,10 +175,30 @@ window.ergApi.onTelemetry((telemetry) => {
 });
 
 window.ergApi.onStatus((status) => {
-  const prefix = status.running ? 'Running' : status.connected ? 'Connected' : status.scanning ? 'Scanning' : 'Idle';
-  const message = status.message ? `${prefix} – ${status.message}` : prefix;
+  const stateLabel = status.running
+    ? 'Running'
+    : status.connected
+      ? 'Connected'
+      : status.scanning
+        ? 'Scanning'
+        : 'Idle';
+  const stateClass = status.running
+    ? 'running'
+    : status.connected
+      ? 'connected'
+      : status.scanning
+        ? 'scanning'
+        : 'idle';
+
+  const message = status.message ? `${stateLabel} — ${status.message}` : stateLabel;
   setStatus(message);
-  handleButtonState(status.connected, status.running);
+  setConnectionState(stateLabel, stateClass);
+  updateButtons(status.connected, status.running);
+
+  if (message !== lastStatusMessage) {
+    appendLog(message);
+    lastStatusMessage = message;
+  }
 });
 
 window.ergApi.onTargetWatts((watts) => {
@@ -125,4 +206,5 @@ window.ergApi.onTargetWatts((watts) => {
 });
 
 setTargetLabel(Number(targetInput?.value ?? 0));
-handleButtonState(false, false);
+updateButtons(false, false);
+setConnectionState('Idle', 'idle');
