@@ -1,0 +1,24 @@
+{
+  "name": "erg-trainer-poc",
+  "version": "0.1.0",
+  "description": "Minimal Electron + TypeScript proof of concept to control an FTMS home trainer in ERG mode.",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc && npm run copy:assets",
+    "copy:assets": "copyfiles -u 1 src/renderer/**/*.{html,css} dist",
+    "start": "npm run build && electron .",
+    "dev": "concurrently \"tsc -w\" \"npm:copy:assets\" \"wait-on dist/main/main.js && electron .\"",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@abandonware/noble": "^1.9.2-15",
+    "electron": "^29.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.17",
+    "concurrently": "^9.0.0",
+    "copyfiles": "^2.4.1",
+    "typescript": "^5.3.3",
+    "wait-on": "^7.2.0"
+  }
+}

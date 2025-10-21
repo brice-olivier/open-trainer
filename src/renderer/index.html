@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ERG Trainer POC</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>ERG Trainer POC</h1>
+        <p class="subtitle">Control an FTMS trainer in ERG mode.</p>
+      </header>
+
+      <section class="card">
+        <h2>Connection</h2>
+        <div class="row">
+          <label for="deviceName">Device filter</label>
+          <input id="deviceName" type="text" placeholder="Optional name contains..." />
+        </div>
+        <button id="connect">Connect</button>
+        <p id="statusMessage" class="status">Not connected</p>
+      </section>
+
+      <section class="card">
+        <h2>ERG Session</h2>
+        <div class="row">
+          <label for="targetWatts">Target Watts</label>
+          <input id="targetWatts" type="number" value="150" min="0" max="2500" step="5" />
+        </div>
+        <div class="row">
+          <label for="duration">Duration (seconds)</label>
+          <input id="duration" type="number" value="0" min="0" step="30" />
+        </div>
+        <div class="actions">
+          <button id="start">Start</button>
+          <button id="stop" class="danger">Stop</button>
+        </div>
+        <div class="actions secondary">
+          <button id="decrease">-10 W</button>
+          <span id="currentTarget">Target: 0 W</span>
+          <button id="increase">+10 W</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Live Telemetry</h2>
+        <ul class="telemetry">
+          <li><span>Power</span><span id="telemetryPower">—</span></li>
+          <li><span>Cadence</span><span id="telemetryCadence">—</span></li>
+          <li><span>Speed</span><span id="telemetrySpeed">—</span></li>
+        </ul>
+      </section>
+    </main>
+
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
