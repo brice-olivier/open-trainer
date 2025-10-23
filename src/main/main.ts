@@ -20,7 +20,7 @@ const createWindow = async (): Promise<void> => {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: 'Dans La Roue',
+    title: 'Open Trainer',
   });
 
   controller.on('telemetry', (payload: TelemetryPayload) => {

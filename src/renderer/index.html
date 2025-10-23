@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dans La Roue</title>
+    <title>Open Trainer</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -25,6 +25,31 @@
           <ul id="deviceList" class="device-list">
             <li class="placeholder">Scanning for Bluetooth devices…</li>
           </ul>
+        </div>
+      </section>
+
+      <section class="card log-card">
+        <h2>Activity Log</h2>
+        <ul id="eventLog" class="event-log">
+          <li class="placeholder">No events yet. Connect to your trainer to see updates.</li>
+        </ul>
+      </section>
+
+      <section class="card telemetry-card">
+        <h2>Live Telemetry</h2>
+        <div class="telemetry-grid">
+          <div class="tile">
+            <h3>Power</h3>
+            <p id="telemetryPower">—</p>
+          </div>
+          <div class="tile">
+            <h3>Cadence</h3>
+            <p id="telemetryCadence">—</p>
+          </div>
+          <div class="tile">
+            <h3>Speed</h3>
+            <p id="telemetrySpeed">—</p>
+          </div>
         </div>
       </section>
 
@@ -85,24 +110,6 @@
         </div>
       </section>
 
-      <section class="card telemetry-card">
-        <h2>Live Telemetry</h2>
-        <div class="telemetry-grid">
-          <div class="tile">
-            <h3>Power</h3>
-            <p id="telemetryPower">—</p>
-          </div>
-          <div class="tile">
-            <h3>Cadence</h3>
-            <p id="telemetryCadence">—</p>
-          </div>
-          <div class="tile">
-            <h3>Speed</h3>
-            <p id="telemetrySpeed">—</p>
-          </div>
-        </div>
-      </section>
-
       <section class="card metrics-card">
         <h2>Performance Metrics</h2>
         <div class="metrics-grid">
@@ -133,12 +140,7 @@
         </div>
       </section>
 
-      <section class="card log-card">
-        <h2>Activity Log</h2>
-        <ul id="eventLog" class="event-log">
-          <li class="placeholder">No events yet. Connect to your trainer to see updates.</li>
-        </ul>
-      </section>
+      
     </main>
 
     <script type="module" src="./renderer.js"></script>

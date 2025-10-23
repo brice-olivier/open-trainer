@@ -100,6 +100,10 @@ let lastStatusMessage = '';
 let lastConnected = false;
 let lastRunning = false;
 
+let draggingBlockId: number | null = null;
+let dropTargetId: number | null = null;
+let dropBeforeTarget = true;
+
 const formatNumber = (value?: number, unit = ''): string => {
   if (value === undefined || Number.isNaN(value)) {
     return '—';
@@ -203,22 +207,46 @@ const renderBlocks = (): void => {
   if (!blockListElement) return;
 
   if (!blocks.length) {
-    blockListElement.innerHTML = '<li class="placeholder">No blocks yet. Add blocks to build your session.</li>';
+    const message = structuredSession
+      ? 'No blocks yet. Add blocks to build your session.'
+      : 'No blocks yet. Add blocks to build your session.';
+    blockListElement.innerHTML = `<li class="placeholder">${message}</li>`;
   } else {
     blockListElement.innerHTML = '';
     blocks.forEach((block, index) => {
       const item = document.createElement('li');
-      if (structuredSession && sessionActive && index === currentBlockIndex) {
+      item.dataset.id = block.id.toString();
+      item.dataset.index = index.toString();
+      const isActive = structuredSession && sessionActive && index === currentBlockIndex;
+      if (isActive) {
         item.classList.add('active');
       }
-      item.dataset.id = block.id.toString();
-      const minutes = block.durationSec / 60;
-      item.innerHTML = `
-        <div>
-          <strong>Block ${index + 1}</strong> – ${formatSeconds(block.durationSec)} @ ${block.targetWatts} W
-        </div>
-        <button class="ghost" data-remove="${block.id}" aria-label="Remove block">✕</button>
-      `;
+      item.draggable = !structuredSession;
+      item.classList.toggle('draggable-disabled', structuredSession);
+
+      const main = document.createElement('div');
+      main.className = 'block-item-main';
+
+      const handle = document.createElement('span');
+      handle.className = 'drag-handle';
+      handle.setAttribute('aria-hidden', 'true');
+      handle.textContent = '::';
+      handle.draggable = false;
+
+      const text = document.createElement('div');
+      text.className = 'block-item-text';
+      text.innerHTML = `<strong>Block ${index + 1}</strong> – ${formatSeconds(block.durationSec)} @ ${block.targetWatts} W`;
+
+      main.append(handle, text);
+
+      const removeButton = document.createElement('button');
+      removeButton.className = 'ghost';
+      removeButton.dataset.remove = block.id.toString();
+      removeButton.setAttribute('aria-label', `Remove block ${index + 1}`);
+      removeButton.textContent = '✕';
+      removeButton.draggable = false;
+
+      item.append(main, removeButton);
       blockListElement.appendChild(item);
     });
   }
@@ -226,6 +254,45 @@ const renderBlocks = (): void => {
   if (totalDurationLabel) {
     totalDurationLabel.textContent = formatSeconds(getTotalDurationSec());
   }
+};
+
+const getBlockIndexById = (blockId: number): number => blocks.findIndex((block) => block.id === blockId);
+
+const moveBlockById = (blockId: number, targetIndex: number): { moved: boolean; fromIndex?: number; toIndex?: number } => {
+  const fromIndex = getBlockIndexById(blockId);
+  if (fromIndex < 0) {
+    return { moved: false };
+  }
+
+  let destination = Math.max(0, Math.min(blocks.length, targetIndex));
+  if (destination === fromIndex || destination === fromIndex + 1) {
+    return { moved: false };
+  }
+
+  const [block] = blocks.splice(fromIndex, 1);
+  if (destination > fromIndex) {
+    destination -= 1;
+  }
+  destination = Math.max(0, Math.min(blocks.length, destination));
+  blocks.splice(destination, 0, block);
+  const finalIndex = getBlockIndexById(blockId);
+  return { moved: true, fromIndex, toIndex: finalIndex };
+};
+
+const removeDropHighlights = (): void => {
+  if (!blockListElement) return;
+  blockListElement.querySelectorAll('.drop-target-before').forEach((el) => el.classList.remove('drop-target-before'));
+  blockListElement.querySelectorAll('.drop-target-after').forEach((el) => el.classList.remove('drop-target-after'));
+};
+
+const resetDragState = (): void => {
+  removeDropHighlights();
+  if (blockListElement) {
+    blockListElement.querySelectorAll('.dragging').forEach((el) => el.classList.remove('dragging'));
+  }
+  draggingBlockId = null;
+  dropTargetId = null;
+  dropBeforeTarget = true;
 };
 
 const getDeviceKindLabel = (device: DiscoveredDevice): string => {
@@ -543,6 +610,82 @@ blockListElement?.addEventListener('click', (event) => {
   blocks = blocks.filter((block) => block.id !== id);
   appendLog(`Removed block ${id}`);
   handleBuilderUpdate();
+});
+
+blockListElement?.addEventListener('dragstart', (event) => {
+  if (structuredSession) {
+    event.preventDefault();
+    return;
+  }
+
+  const target = (event.target as HTMLElement).closest('li[data-id]') as HTMLLIElement | null;
+  if (!target) {
+    event.preventDefault();
+    return;
+  }
+
+  draggingBlockId = Number(target.dataset.id);
+  dropTargetId = null;
+  dropBeforeTarget = true;
+  target.classList.add('dragging');
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', target.dataset.id ?? '');
+  }
+});
+
+blockListElement?.addEventListener('dragend', () => {
+  resetDragState();
+});
+
+blockListElement?.addEventListener('dragover', (event) => {
+  if (draggingBlockId === null || structuredSession) {
+    return;
+  }
+  event.preventDefault();
+  const target = (event.target as HTMLElement).closest('li[data-id]') as HTMLLIElement | null;
+  removeDropHighlights();
+  if (!target) {
+    dropTargetId = null;
+    return;
+  }
+  const targetId = Number(target.dataset.id);
+  if (targetId === draggingBlockId) {
+    dropTargetId = null;
+    return;
+  }
+
+  const rect = target.getBoundingClientRect();
+  const isBefore = event.clientY < rect.top + rect.height / 2;
+  dropTargetId = targetId;
+  dropBeforeTarget = isBefore;
+  target.classList.add(isBefore ? 'drop-target-before' : 'drop-target-after');
+});
+
+blockListElement?.addEventListener('drop', (event) => {
+  if (draggingBlockId === null || structuredSession) {
+    return;
+  }
+  event.preventDefault();
+  const destinationIndex = (() => {
+    if (dropTargetId === null) {
+      return blocks.length;
+    }
+    const targetIndex = getBlockIndexById(dropTargetId);
+    if (targetIndex < 0) {
+      return blocks.length;
+    }
+    return dropBeforeTarget ? targetIndex : targetIndex + 1;
+  })();
+
+  const result = moveBlockById(draggingBlockId, destinationIndex);
+  const fromIndex = result.fromIndex;
+  const toIndex = result.toIndex;
+  resetDragState();
+  if (result.moved && typeof fromIndex === 'number' && typeof toIndex === 'number') {
+    appendLog(`Reordered block from #${fromIndex + 1} to #${toIndex + 1}`);
+    handleBuilderUpdate();
+  }
 });
 
 deviceListElement?.addEventListener('click', async (event) => {

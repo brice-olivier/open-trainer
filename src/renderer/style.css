@@ -264,6 +264,7 @@ button.small {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 0.9rem;
+  gap: 12px;
 }
 
 .block-list li.active {
@@ -274,6 +275,51 @@ button.small {
 .block-list li.placeholder {
   justify-content: center;
   opacity: 0.65;
+}
+
+.block-list li.dragging {
+  opacity: 0.4;
+}
+
+.block-list li.drop-target-before {
+  border-top-color: rgba(56, 189, 248, 0.8);
+  box-shadow: inset 0 4px 0 rgba(56, 189, 248, 0.25);
+}
+
+.block-list li.drop-target-after {
+  border-bottom-color: rgba(56, 189, 248, 0.8);
+  box-shadow: inset 0 -4px 0 rgba(56, 189, 248, 0.25);
+}
+
+.block-item-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.block-item-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.drag-handle {
+  font-size: 1.1rem;
+  cursor: grab;
+  opacity: 0.6;
+  user-select: none;
+  padding: 0 6px;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.block-list li.draggable-disabled .drag-handle {
+  cursor: default;
+  opacity: 0.25;
 }
 
 .block-list button {
