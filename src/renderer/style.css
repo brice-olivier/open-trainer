@@ -150,6 +150,82 @@ button.ghost {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+button.small {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
+.device-discovery {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.device-discovery-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.device-discovery-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.device-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.device-list .placeholder {
+  text-align: center;
+  opacity: 0.65;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+.device-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 12px;
+}
+
+.device-item.connected {
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.18);
+}
+
+.device-label {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.device-meta {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.device-action {
+  min-width: 100px;
+}
+
 .builder-form {
   display: grid;
   gap: 12px;

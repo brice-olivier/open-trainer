@@ -7,6 +7,7 @@ import noble, {
 export interface ConnectOptions {
   deviceName?: string;
   timeoutMs?: number;
+  deviceId?: string;
 }
 
 export interface StartSessionOptions {
@@ -25,6 +26,7 @@ export interface StatusPayload {
   controlling: boolean;
   running: boolean;
   scanning: boolean;
+  deviceId?: string;
   paused?: boolean;
   message?: string;
 }
@@ -33,6 +35,8 @@ const FTMS_SERVICE_UUID = '1826';
 const FTMS_CONTROL_POINT_UUID = '2ad9';
 const FTMS_INDOOR_BIKE_UUID = '2ad2';
 const FTMS_STATUS_UUID = '2ada';
+const HEART_RATE_SERVICE_UUID = '180d';
+const DEVICE_STALE_MS = 15000;
 
 const FTMS_REQUEST_CONTROL = 0x00;
 const FTMS_RESET = 0x01;
@@ -55,7 +59,46 @@ const FTMS_FLAG_MET_EQUIPMENT_PRESENT = 1 << 10;
 const FTMS_FLAG_ELAPSED_TIME_PRESENT = 1 << 11;
 const FTMS_FLAG_REMAINING_TIME_PRESENT = 1 << 12;
 
+export interface DiscoveredDevice {
+  id: string;
+  label: string;
+  name?: string;
+  identifier?: string;
+  services: string[];
+  rssi?: number;
+  kind: 'trainer' | 'heart-rate' | 'unknown';
+  connectable: boolean;
+  connected: boolean;
+  lastSeen: number;
+}
+
 export class TrainerController extends EventEmitter {
+  private static formatIdentifier(raw?: string): string | undefined {
+    if (!raw) return undefined;
+    const cleaned = raw.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+    if (!cleaned) return undefined;
+    const tail = cleaned.slice(-6);
+    if (tail.length < 4) {
+      return cleaned.toUpperCase();
+    }
+    const segments = tail.match(/.{1,2}/g);
+    if (!segments) {
+      return tail.toUpperCase();
+    }
+    return segments.join(':').toUpperCase();
+  }
+
+  private static buildDeviceLabel(peripheral: Peripheral): string {
+    const advertisedName = (peripheral.advertisement?.localName || '').trim();
+    const identifier = TrainerController.formatIdentifier(peripheral.uuid || peripheral.id);
+    const parts: string[] = [];
+    parts.push(advertisedName || `FTMS service ${FTMS_SERVICE_UUID}`);
+    if (identifier) {
+      parts.push(identifier);
+    }
+    return parts.join(' • ');
+  }
+
   private peripheral?: Peripheral;
 
   private indoorBikeCharacteristic?: Characteristic;
@@ -78,10 +121,32 @@ export class TrainerController extends EventEmitter {
 
   private isPaused = false;
 
-  async connect(options: ConnectOptions = {}): Promise<void> {
+  private connectedDeviceLabel?: string;
+
+  private connectedDeviceId?: string;
+
+  private readonly discoveredPeripherals = new Map<string, Peripheral>();
+
+  private readonly discoveredDevices = new Map<string, DiscoveredDevice>();
+
+  private discovering = false;
+
+  private readonly handleDiscoverBound = this.handleDiscover.bind(this);
+
+  async connect(options: ConnectOptions = {}): Promise<string | undefined> {
     if (this.peripheral) {
       this.emitStatus({ message: 'Trainer already connected' });
-      return;
+      return this.connectedDeviceLabel;
+    }
+
+    const { deviceId } = options;
+    if (deviceId) {
+      const known = this.discoveredPeripherals.get(deviceId);
+      if (known) {
+        await this.stopDiscovery().catch(() => undefined);
+        await this.bindPeripheral(known);
+        return this.connectedDeviceLabel;
+      }
     }
 
     if (noble._state === 'poweredOn') {
@@ -104,6 +169,70 @@ export class TrainerController extends EventEmitter {
         noble.on('stateChange', handleState);
       });
     }
+
+    return this.connectedDeviceLabel;
+  }
+
+  async startDiscovery(): Promise<void> {
+    if (this.discovering) {
+      this.emitDevices();
+      return;
+    }
+
+    const begin = async (): Promise<void> => {
+      this.discovering = true;
+      for (const id of [...this.discoveredDevices.keys()]) {
+        if (id !== this.connectedDeviceId) {
+          this.discoveredDevices.delete(id);
+          this.discoveredPeripherals.delete(id);
+        }
+      }
+      this.emitDevices();
+      noble.removeListener('discover', this.handleDiscoverBound);
+      noble.on('discover', this.handleDiscoverBound);
+      try {
+        await noble.startScanningAsync([], true);
+        this.emitStatus({ scanning: true, message: 'Scanning for devices' });
+      } catch (error) {
+        noble.removeListener('discover', this.handleDiscoverBound);
+        this.discovering = false;
+        throw error;
+      }
+    };
+
+    if (noble._state === 'poweredOn') {
+      await begin();
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const handleState = async (state: string) => {
+        if (state === 'poweredOn') {
+          noble.removeListener('stateChange', handleState);
+          try {
+            await begin();
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        } else if (state === 'unsupported' || state === 'unauthorized') {
+          reject(new Error(`Bluetooth adapter state ${state}`));
+        }
+      };
+      noble.on('stateChange', handleState);
+    });
+  }
+
+  async stopDiscovery(): Promise<void> {
+    if (!this.discovering) return;
+    this.discovering = false;
+    noble.removeListener('discover', this.handleDiscoverBound);
+    try {
+      await noble.stopScanningAsync();
+    } catch (error) {
+      // ignore stop scanning errors
+    }
+    this.emitStatus({ scanning: false });
   }
 
   async startSession(options: StartSessionOptions): Promise<void> {
@@ -130,6 +259,24 @@ export class TrainerController extends EventEmitter {
     this.sessionTimerRemainingMs = undefined;
     this.clearSessionTimer();
     this.emitStatus({ message: 'ERG session stopped', running: false, controlling: this.isControlling, paused: false });
+  }
+
+  async disconnect(): Promise<void> {
+    if (!this.peripheral) {
+      return;
+    }
+    try {
+      await this.stopSession();
+    } catch (error) {
+      // ignore stop errors during disconnect
+    }
+    if (this.peripheral && this.peripheral.state === 'connected') {
+      try {
+        await this.peripheral.disconnectAsync();
+      } catch (error) {
+        // ignore disconnect errors
+      }
+    }
   }
 
   async pauseSession(): Promise<void> {
@@ -184,6 +331,7 @@ export class TrainerController extends EventEmitter {
   }
 
   async shutdown(): Promise<void> {
+    await this.stopDiscovery().catch(() => undefined);
     this.clearSessionTimer();
     this.sessionTimerRemainingMs = undefined;
     if (this.peripheral) {
@@ -197,15 +345,18 @@ export class TrainerController extends EventEmitter {
       } catch (error) {
         // ignore errors during shutdown
       }
-      this.peripheral.removeAllListeners('disconnect');
-      if (this.peripheral.state === 'connected') {
-        await this.peripheral.disconnectAsync();
-      }
-      this.peripheral = undefined;
     }
+    await this.disconnect();
     this.isControlling = false;
     this.isRunning = false;
     this.isPaused = false;
+    if (!this.peripheral) {
+      this.connectedDeviceLabel = undefined;
+      this.connectedDeviceId = undefined;
+    }
+    this.discoveredPeripherals.clear();
+    this.discoveredDevices.clear();
+    this.emitDevices();
   }
 
   private async ensureConnected(): Promise<void> {
@@ -215,7 +366,9 @@ export class TrainerController extends EventEmitter {
   }
 
   private async scanAndConnect(options: ConnectOptions): Promise<void> {
-    const { deviceName, timeoutMs = 20000 } = options;
+    const { deviceName, timeoutMs = 20000, deviceId } = options;
+
+    await this.stopDiscovery().catch(() => undefined);
 
     await new Promise<void>((resolve, reject) => {
       const stopScanning = async () => {
@@ -224,6 +377,7 @@ export class TrainerController extends EventEmitter {
         } catch (error) {
           // ignore stop scanning errors
         }
+        this.emitStatus({ scanning: false });
       };
 
       const timeoutHandle = setTimeout(() => {
@@ -235,10 +389,15 @@ export class TrainerController extends EventEmitter {
       const onDiscover = async (peripheral: Peripheral) => {
         const advertisement = peripheral.advertisement;
         const services = advertisement.serviceUuids || [];
-        const matchesService = services.map((s) => s.toLowerCase()).includes(FTMS_SERVICE_UUID);
+        const lowerServices = services.map((s) => s.toLowerCase());
+        const matchesService = lowerServices.includes(FTMS_SERVICE_UUID);
         const matchesName = !deviceName || (advertisement.localName || '').toLowerCase().includes(deviceName.toLowerCase());
+        const id = this.getPeripheralId(peripheral);
+        const matchesId = !deviceId || id === deviceId;
 
-        if (!matchesService || !matchesName) {
+        this.handleDiscover(peripheral);
+
+        if (!matchesService || !matchesName || !matchesId) {
           return;
         }
 
@@ -261,13 +420,21 @@ export class TrainerController extends EventEmitter {
         noble.removeListener('discover', onDiscover);
         reject(error);
       });
+
+      this.emitStatus({ scanning: true, message: 'Scanning for trainer' });
     });
   }
 
   private async bindPeripheral(peripheral: Peripheral): Promise<void> {
+    const id = this.getPeripheralId(peripheral);
     this.peripheral = peripheral;
+    this.connectedDeviceLabel = TrainerController.buildDeviceLabel(peripheral);
+    this.connectedDeviceId = id;
+    this.discoveredPeripherals.set(id, peripheral);
+    this.handleDiscover(peripheral);
 
     peripheral.once('disconnect', () => {
+      const disconnectedLabel = this.connectedDeviceLabel;
       this.peripheral = undefined;
       this.controlPointCharacteristic = undefined;
       this.indoorBikeCharacteristic = undefined;
@@ -277,7 +444,11 @@ export class TrainerController extends EventEmitter {
       this.isPaused = false;
       this.sessionTimerRemainingMs = undefined;
       this.clearSessionTimer();
-      this.emitStatus({ message: 'Trainer disconnected', connected: false, controlling: false, running: false, paused: false });
+      this.connectedDeviceLabel = undefined;
+      this.connectedDeviceId = undefined;
+      this.emitDevices();
+      const message = disconnectedLabel ? `Trainer disconnected (${disconnectedLabel})` : 'Trainer disconnected';
+      this.emitStatus({ message, connected: false, controlling: false, running: false, paused: false });
     });
 
     await peripheral.connectAsync();
@@ -310,7 +481,9 @@ export class TrainerController extends EventEmitter {
 
     await this.writeControlPoint(Buffer.from([FTMS_REQUEST_CONTROL]));
     this.isControlling = true;
-    this.emitStatus({ message: 'Trainer connected', connected: true, controlling: true });
+    const message = this.connectedDeviceLabel ? `Trainer connected (${this.connectedDeviceLabel})` : 'Trainer connected';
+    this.emitStatus({ message, connected: true, controlling: true });
+    this.emitDevices();
   }
 
   private async subscribe(characteristic: Characteristic, listener: (data: Buffer) => void): Promise<void> {
@@ -454,6 +627,71 @@ export class TrainerController extends EventEmitter {
     });
   }
 
+  private getPeripheralId(peripheral: Peripheral): string {
+    return peripheral.id ?? peripheral.uuid;
+  }
+
+  private handleDiscover(peripheral: Peripheral): void {
+    const id = this.getPeripheralId(peripheral);
+    this.discoveredPeripherals.set(id, peripheral);
+
+    const serviceUuids = (peripheral.advertisement?.serviceUuids || []).map((uuid) => uuid.toLowerCase());
+    let kind: DiscoveredDevice['kind'] = 'unknown';
+    if (serviceUuids.includes(FTMS_SERVICE_UUID)) {
+      kind = 'trainer';
+    } else if (serviceUuids.includes(HEART_RATE_SERVICE_UUID)) {
+      kind = 'heart-rate';
+    }
+
+    const label = TrainerController.buildDeviceLabel(peripheral);
+    const name = (peripheral.advertisement?.localName || '').trim() || undefined;
+    const identifier = TrainerController.formatIdentifier(peripheral.uuid || peripheral.id);
+
+    const device: DiscoveredDevice = {
+      id,
+      label,
+      name,
+      identifier,
+      services: serviceUuids,
+      rssi: typeof peripheral.rssi === 'number' ? peripheral.rssi : undefined,
+      kind,
+      connectable: peripheral.connectable ?? true,
+      connected: id === this.connectedDeviceId,
+      lastSeen: Date.now(),
+    };
+
+    this.discoveredDevices.set(id, device);
+    this.emitDevices();
+  }
+
+  private emitDevices(): void {
+    const now = Date.now();
+    for (const [id, device] of [...this.discoveredDevices.entries()]) {
+      if (id !== this.connectedDeviceId && now - device.lastSeen > DEVICE_STALE_MS) {
+        this.discoveredDevices.delete(id);
+      }
+    }
+
+    const devices = Array.from(this.discoveredDevices.values())
+      .map((device) => ({
+        ...device,
+        connected: device.id === this.connectedDeviceId,
+      }))
+      .sort((a, b) => {
+        if (a.connected !== b.connected) return a.connected ? -1 : 1;
+        if (a.kind !== b.kind) {
+          if (a.kind === 'trainer') return -1;
+          if (b.kind === 'trainer') return 1;
+          if (a.kind === 'heart-rate') return -1;
+          if (b.kind === 'heart-rate') return 1;
+        }
+        if (a.label !== b.label) return a.label.localeCompare(b.label);
+        return 0;
+      });
+
+    this.emit('devices', devices);
+  }
+
   private clearSessionTimer(): void {
     if (this.sessionTimer) {
       clearTimeout(this.sessionTimer);
@@ -482,9 +720,10 @@ export class TrainerController extends EventEmitter {
       connected: Boolean(this.peripheral),
       controlling: this.isControlling,
       running: this.isRunning,
-      scanning: false,
+      scanning: this.discovering,
       message: partial.message,
       paused: this.isPaused,
+      deviceId: this.connectedDeviceId,
     };
 
     if (typeof partial.connected === 'boolean') {
@@ -501,6 +740,9 @@ export class TrainerController extends EventEmitter {
     }
     if (typeof partial.paused === 'boolean') {
       payload.paused = partial.paused;
+    }
+    if (typeof partial.deviceId === 'string') {
+      payload.deviceId = partial.deviceId;
     }
 
     this.emit('status', payload);

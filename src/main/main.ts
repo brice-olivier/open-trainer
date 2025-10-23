@@ -5,6 +5,7 @@ import TrainerController, {
   StartSessionOptions,
   TelemetryPayload,
   StatusPayload,
+  DiscoveredDevice,
 } from './trainerController';
 
 let mainWindow: BrowserWindow | null = null;
@@ -34,6 +35,10 @@ const createWindow = async (): Promise<void> => {
     mainWindow?.webContents.send('trainer:target', watts);
   });
 
+  controller.on('devices', (devices: DiscoveredDevice[]) => {
+    mainWindow?.webContents.send('trainer:devices', devices);
+  });
+
   const rendererPath = path.join(__dirname, '../renderer/index.html');
   await mainWindow.loadFile(rendererPath);
 
@@ -61,7 +66,22 @@ app.on('window-all-closed', async () => {
 });
 
 ipcMain.handle('trainer/connect', async (_event, options: ConnectOptions) => {
-  await controller.connect(options);
+  const label = await controller.connect(options);
+  return { ok: true, label };
+});
+
+ipcMain.handle('trainer/disconnect', async () => {
+  await controller.disconnect();
+  return { ok: true };
+});
+
+ipcMain.handle('trainer/startDiscovery', async () => {
+  await controller.startDiscovery();
+  return { ok: true };
+});
+
+ipcMain.handle('trainer/stopDiscovery', async () => {
+  await controller.stopDiscovery();
   return { ok: true };
 });
 

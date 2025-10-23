@@ -17,11 +17,15 @@
             <p id="statusMessage" class="status-sub">Not connected</p>
           </div>
         </div>
-        <div class="row">
-          <label for="deviceName">Device filter</label>
-          <input id="deviceName" type="text" placeholder="Optional name contains..." />
+        <div class="device-discovery">
+          <div class="device-discovery-header">
+            <h3>Nearby devices</h3>
+            <button id="rescanDevices" class="ghost small" type="button">Rescan</button>
+          </div>
+          <ul id="deviceList" class="device-list">
+            <li class="placeholder">Scanning for Bluetooth devices…</li>
+          </ul>
         </div>
-        <button id="connect">Connect</button>
       </section>
 
       <section class="card builder-card">

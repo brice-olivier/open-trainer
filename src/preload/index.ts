@@ -1,8 +1,9 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import { ConnectOptions, StartSessionOptions, TelemetryPayload, StatusPayload } from '../main/trainerController';
+import { ConnectOptions, StartSessionOptions, TelemetryPayload, StatusPayload, DiscoveredDevice } from '../main/trainerController';
 
 export interface ErgApi {
-  connect: (options?: ConnectOptions) => Promise<void>;
+  connect: (options?: ConnectOptions) => Promise<string | undefined>;
+  disconnect: () => Promise<void>;
   start: (options: StartSessionOptions) => Promise<void>;
   stop: () => Promise<void>;
   pause: () => Promise<void>;
@@ -10,9 +11,12 @@ export interface ErgApi {
   setTargetWatts: (watts: number) => Promise<void>;
   nudgeWatts: (delta: number) => Promise<number | undefined>;
   shutdown: () => Promise<void>;
+  startDiscovery: () => Promise<void>;
+  stopDiscovery: () => Promise<void>;
   onTelemetry: (listener: (telemetry: TelemetryPayload) => void) => () => void;
   onStatus: (listener: (status: StatusPayload) => void) => () => void;
   onTargetWatts: (listener: (watts: number) => void) => () => void;
+  onDevices: (listener: (devices: DiscoveredDevice[]) => void) => () => void;
 }
 
 const registerChannel = <T>(channel: string, listener: (payload: T) => void): (() => void) => {
@@ -27,7 +31,11 @@ const registerChannel = <T>(channel: string, listener: (payload: T) => void): ((
 
 const api: ErgApi = {
   async connect(options?: ConnectOptions) {
-    await ipcRenderer.invoke('trainer/connect', options ?? {});
+    const response = await ipcRenderer.invoke('trainer/connect', options ?? {});
+    return response?.label as string | undefined;
+  },
+  async disconnect() {
+    await ipcRenderer.invoke('trainer/disconnect');
   },
   async start(options: StartSessionOptions) {
     await ipcRenderer.invoke('trainer/start', options);
@@ -51,6 +59,12 @@ const api: ErgApi = {
   async shutdown() {
     await ipcRenderer.invoke('trainer/shutdown');
   },
+  async startDiscovery() {
+    await ipcRenderer.invoke('trainer/startDiscovery');
+  },
+  async stopDiscovery() {
+    await ipcRenderer.invoke('trainer/stopDiscovery');
+  },
   onTelemetry(listener: (telemetry: TelemetryPayload) => void) {
     return registerChannel<TelemetryPayload>('trainer:telemetry', listener);
   },
@@ -59,6 +73,9 @@ const api: ErgApi = {
   },
   onTargetWatts(listener: (watts: number) => void) {
     return registerChannel<number>('trainer:target', listener);
+  },
+  onDevices(listener: (devices: DiscoveredDevice[]) => void) {
+    return registerChannel<DiscoveredDevice[]>('trainer:devices', listener);
   },
 };
 

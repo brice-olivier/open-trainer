@@ -13,6 +13,19 @@ interface MetricStats {
   speedSamples: number;
 }
 
+interface DiscoveredDevice {
+  id: string;
+  label: string;
+  name?: string;
+  identifier?: string;
+  services: string[];
+  rssi?: number;
+  kind: 'trainer' | 'heart-rate' | 'unknown';
+  connectable: boolean;
+  connected: boolean;
+  lastSeen: number;
+}
+
 const createMetricStats = (): MetricStats => ({
   powerSum: 0,
   powerSamples: 0,
@@ -22,11 +35,11 @@ const createMetricStats = (): MetricStats => ({
   speedSamples: 0,
 });
 
-const deviceInput = document.getElementById('deviceName') as HTMLInputElement | null;
-const connectButton = document.getElementById('connect') as HTMLButtonElement | null;
+const rescanDevicesButton = document.getElementById('rescanDevices') as HTMLButtonElement | null;
 const statusMessage = document.getElementById('statusMessage') as HTMLParagraphElement | null;
 const connectionStateLabel = document.getElementById('connectionState') as HTMLParagraphElement | null;
 const connectionDot = document.getElementById('connectionDot') as HTMLSpanElement | null;
+const deviceListElement = document.getElementById('deviceList') as HTMLUListElement | null;
 
 const blockDurationInput = document.getElementById('blockDuration') as HTMLInputElement | null;
 const blockWattsInput = document.getElementById('blockWatts') as HTMLInputElement | null;
@@ -69,6 +82,9 @@ let blockCounter = 0;
 let sessionActive = false;
 let structuredSession = false;
 let sessionPaused = false;
+let discoveredDevices: DiscoveredDevice[] = [];
+let deviceScanning = false;
+let connectedDeviceId: string | null = null;
 let currentBlockIndex = -1;
 let sessionStartTime = 0;
 let blockStartTime = 0;
@@ -212,6 +228,83 @@ const renderBlocks = (): void => {
   }
 };
 
+const getDeviceKindLabel = (device: DiscoveredDevice): string => {
+  switch (device.kind) {
+    case 'trainer':
+      return 'Trainer';
+    case 'heart-rate':
+      return 'Heart rate';
+    default:
+      return 'Bluetooth device';
+  }
+};
+
+const formatRssi = (value?: number): string | undefined => {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return undefined;
+  }
+  return `${value} dBm`;
+};
+
+const renderDeviceList = (): void => {
+  if (!deviceListElement) return;
+
+  if (!discoveredDevices.length) {
+    const placeholder = deviceScanning ? 'Scanning for Bluetooth devices…' : 'No devices found. Try rescan.';
+    deviceListElement.innerHTML = `<li class="placeholder">${placeholder}</li>`;
+    return;
+  }
+
+  deviceListElement.innerHTML = '';
+  discoveredDevices.forEach((device) => {
+    const item = document.createElement('li');
+    item.className = 'device-item';
+    const isConnected = device.connected || (connectedDeviceId !== null && device.id === connectedDeviceId);
+    if (isConnected) {
+      item.classList.add('connected');
+    }
+
+    const info = document.createElement('div');
+
+    const labelElem = document.createElement('p');
+    labelElem.className = 'device-label';
+    labelElem.textContent = device.label;
+
+    const metaElem = document.createElement('p');
+    metaElem.className = 'device-meta';
+    const metaParts: string[] = [getDeviceKindLabel(device)];
+    const rssiText = formatRssi(device.rssi);
+    if (rssiText) {
+      metaParts.push(rssiText);
+    }
+    metaElem.textContent = metaParts.join(' • ');
+
+    info.appendChild(labelElem);
+    info.appendChild(metaElem);
+
+    const action = document.createElement('button');
+    action.type = 'button';
+    const supportsConnect = device.kind === 'trainer';
+    action.className = isConnected ? 'danger small device-action' : 'small device-action';
+    action.dataset.deviceId = device.id;
+    if (supportsConnect || isConnected) {
+      action.dataset.deviceAction = isConnected ? 'disconnect' : 'connect';
+      action.textContent = isConnected ? 'Disconnect' : 'Connect';
+      if (!isConnected && !device.connectable) {
+        action.disabled = true;
+      }
+    } else {
+      action.className = 'ghost small device-action';
+      action.textContent = 'Unavailable';
+      action.disabled = true;
+    }
+
+    item.appendChild(info);
+    item.appendChild(action);
+    deviceListElement.appendChild(item);
+  });
+};
+
 const updateTargetLabel = (watts: number): void => {
   if (currentTargetLabel) {
     currentTargetLabel.textContent = `Target: ${Math.round(watts)} W`;
@@ -238,7 +331,6 @@ const updateButtons = (connected: boolean, running: boolean): void => {
   if (stopButton) stopButton.disabled = !connected || !hasSession;
   if (increaseButton) increaseButton.disabled = !connected;
   if (decreaseButton) decreaseButton.disabled = !connected;
-  if (connectButton) connectButton.disabled = connected;
 };
 
 const updateBlockUI = (): void => {
@@ -453,24 +545,80 @@ blockListElement?.addEventListener('click', (event) => {
   handleBuilderUpdate();
 });
 
-connectButton?.addEventListener('click', async () => {
-  try {
-    if (connectButton) connectButton.disabled = true;
+deviceListElement?.addEventListener('click', async (event) => {
+  const target = (event.target as HTMLElement).closest('button[data-device-action]') as HTMLButtonElement | null;
+  if (!target) return;
+
+  event.preventDefault();
+
+  const deviceId = target.dataset.deviceId;
+  const action = target.dataset.deviceAction;
+  if (!deviceId || !action) return;
+
+  const device = discoveredDevices.find((entry) => entry.id === deviceId);
+  const friendlyLabel = device?.label ?? deviceId;
+  const originalText = target.textContent ?? '';
+
+  target.disabled = true;
+
+  if (action === 'connect') {
+    target.textContent = 'Connecting…';
     setConnectionState('Scanning', 'scanning');
-    setStatus('Connecting…');
+    setStatus(`Connecting to ${friendlyLabel}…`);
+    appendLog(`Connecting to ${friendlyLabel}`);
+    try {
+      const connectionLabel = await window.ergApi.connect({ deviceId });
+      const labelText = (connectionLabel && connectionLabel.trim()) || friendlyLabel;
+      setStatus(`Connected. Control acquired (${labelText}).`);
+      setConnectionState('Connected', 'connected');
+      appendLog(`Connected to trainer (${labelText})`);
+      deviceScanning = true;
+      renderDeviceList();
+      await window.ergApi.startDiscovery().catch(() => undefined);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Failed to connect: ${(error as Error).message}`);
+      setConnectionState('Idle', 'idle');
+      appendLog(`Connection failed: ${(error as Error).message}`);
+    }
+  } else if (action === 'disconnect') {
+    target.textContent = 'Disconnecting…';
+    setStatus('Disconnecting…');
+    appendLog('Disconnecting from trainer');
+    try {
+      await window.ergApi.disconnect();
+      deviceScanning = true;
+      renderDeviceList();
+      await window.ergApi.startDiscovery().catch(() => undefined);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Failed to disconnect: ${(error as Error).message}`);
+      appendLog(`Failed to disconnect: ${(error as Error).message}`);
+    }
+  }
 
-    const filter = deviceInput?.value.trim();
-    await window.ergApi.connect(filter ? { deviceName: filter } : {});
+  target.textContent = originalText;
+  target.disabled = false;
+});
 
-    setStatus('Connected. Control acquired.');
-    setConnectionState('Connected', 'connected');
-    appendLog('Connected to trainer');
+rescanDevicesButton?.addEventListener('click', async () => {
+  if (rescanDevicesButton) rescanDevicesButton.disabled = true;
+  deviceScanning = true;
+  discoveredDevices = [];
+  renderDeviceList();
+  try {
+    await window.ergApi.stopDiscovery();
   } catch (error) {
     console.error(error);
-    setStatus(`Failed to connect: ${(error as Error).message}`);
-    setConnectionState('Idle', 'idle');
-    if (connectButton) connectButton.disabled = false;
-    appendLog(`Connection failed: ${(error as Error).message}`);
+  }
+  try {
+    await window.ergApi.startDiscovery();
+  } catch (error) {
+    console.error(error);
+    setStatus(`Failed to start scan: ${(error as Error).message}`);
+    appendLog(`Discovery failed: ${(error as Error).message}`);
+  } finally {
+    if (rescanDevicesButton) rescanDevicesButton.disabled = false;
   }
 });
 
@@ -619,6 +767,15 @@ decreaseButton?.addEventListener('click', async () => {
   }
 });
 
+window.ergApi.onDevices((devices) => {
+  discoveredDevices = devices;
+  const active = devices.find((device) => device.connected);
+  if (active) {
+    connectedDeviceId = active.id;
+  }
+  renderDeviceList();
+});
+
 window.ergApi.onTelemetry((telemetry) => {
   if (telemetryPower) telemetryPower.textContent = formatNumber(telemetry.powerWatts, ' W');
   if (telemetryCadence) telemetryCadence.textContent = formatNumber(telemetry.cadenceRpm, ' rpm');
@@ -676,6 +833,13 @@ window.ergApi.onStatus((status) => {
   setStatus(message);
   setConnectionState(stateLabel, stateClass);
   sessionPaused = Boolean(status.paused);
+  deviceScanning = Boolean(status.scanning);
+  if (status.connected && typeof status.deviceId === 'string') {
+    connectedDeviceId = status.deviceId;
+  } else if (!status.connected) {
+    connectedDeviceId = null;
+  }
+  renderDeviceList();
   updateButtons(status.connected, status.running);
 
   lastConnected = status.connected;
@@ -696,6 +860,18 @@ window.ergApi.onTargetWatts((watts) => {
 });
 
 updateTargetLabel(Number(targetInput?.value ?? 0));
+deviceScanning = true;
+renderDeviceList();
+void window.ergApi.startDiscovery().catch((error: unknown) => {
+  console.error(error);
+  setStatus(`Failed to start discovery: ${(error as Error).message}`);
+  appendLog(`Discovery failed: ${(error as Error).message}`);
+  deviceScanning = false;
+  renderDeviceList();
+});
+window.addEventListener('beforeunload', () => {
+  void window.ergApi.stopDiscovery();
+});
 updateButtons(false, false);
 setConnectionState('Idle', 'idle');
 renderBlocks();
