@@ -25,6 +25,7 @@ export interface StatusPayload {
   controlling: boolean;
   running: boolean;
   scanning: boolean;
+  paused?: boolean;
   message?: string;
 }
 
@@ -69,7 +70,13 @@ export class TrainerController extends EventEmitter {
 
   private sessionTimer?: NodeJS.Timeout;
 
+  private sessionTimerStartedAt?: number;
+
+  private sessionTimerRemainingMs?: number;
+
   private currentTargetWatts = 0;
+
+  private isPaused = false;
 
   async connect(options: ConnectOptions = {}): Promise<void> {
     if (this.peripheral) {
@@ -106,16 +113,10 @@ export class TrainerController extends EventEmitter {
     await this.setTargetWatts(targetWatts);
     await this.startOrResume();
     this.isRunning = true;
-    this.emitStatus({ message: 'ERG session running', running: true, controlling: this.isControlling });
-
-    if (durationSeconds && durationSeconds > 0) {
-      if (this.sessionTimer) {
-        clearTimeout(this.sessionTimer);
-      }
-      this.sessionTimer = setTimeout(() => {
-        void this.stopSession();
-      }, durationSeconds * 1000);
-    }
+    this.isPaused = false;
+    this.sessionTimerRemainingMs = durationSeconds && durationSeconds > 0 ? durationSeconds * 1000 : undefined;
+    this.scheduleSessionTimer();
+    this.emitStatus({ message: 'ERG session running', running: true, controlling: this.isControlling, paused: false });
   }
 
   async stopSession(): Promise<void> {
@@ -125,7 +126,43 @@ export class TrainerController extends EventEmitter {
 
     await this.writeControlPoint(Buffer.from([FTMS_STOP_PAUSE]));
     this.isRunning = false;
-    this.emitStatus({ message: 'ERG session stopped', running: false, controlling: this.isControlling });
+    this.isPaused = false;
+    this.sessionTimerRemainingMs = undefined;
+    this.clearSessionTimer();
+    this.emitStatus({ message: 'ERG session stopped', running: false, controlling: this.isControlling, paused: false });
+  }
+
+  async pauseSession(): Promise<void> {
+    if (!this.peripheral || !this.controlPointCharacteristic) {
+      return;
+    }
+    if (!this.isRunning) {
+      return;
+    }
+
+    await this.writeControlPoint(Buffer.from([FTMS_STOP_PAUSE]));
+    this.isRunning = false;
+    this.isPaused = true;
+    if (this.sessionTimerStartedAt && typeof this.sessionTimerRemainingMs === 'number') {
+      const elapsed = Date.now() - this.sessionTimerStartedAt;
+      this.sessionTimerRemainingMs = Math.max(0, this.sessionTimerRemainingMs - elapsed);
+    }
+    this.clearSessionTimer();
+    this.emitStatus({ message: 'ERG session paused', running: false, controlling: this.isControlling, paused: true });
+  }
+
+  async resumeSession(): Promise<void> {
+    if (this.isRunning) {
+      return;
+    }
+
+    await this.ensureConnected();
+    await this.requestControl();
+    await this.startOrResume();
+    this.isRunning = true;
+    this.isPaused = false;
+    this.scheduleSessionTimer();
+    this.emitStatus({ message: 'ERG session running', running: true, controlling: this.isControlling, paused: false });
   }
 
   async setTargetWatts(watts: number): Promise<void> {
@@ -147,9 +184,8 @@ export class TrainerController extends EventEmitter {
   }
 
   async shutdown(): Promise<void> {
-    if (this.sessionTimer) {
-      clearTimeout(this.sessionTimer);
-    }
+    this.clearSessionTimer();
+    this.sessionTimerRemainingMs = undefined;
     if (this.peripheral) {
       try {
         await this.writeControlPoint(Buffer.from([FTMS_STOP_PAUSE]));
@@ -169,6 +205,7 @@ export class TrainerController extends EventEmitter {
     }
     this.isControlling = false;
     this.isRunning = false;
+    this.isPaused = false;
   }
 
   private async ensureConnected(): Promise<void> {
@@ -237,7 +274,10 @@ export class TrainerController extends EventEmitter {
       this.statusCharacteristic = undefined;
       this.isControlling = false;
       this.isRunning = false;
-      this.emitStatus({ message: 'Trainer disconnected', connected: false, controlling: false, running: false });
+      this.isPaused = false;
+      this.sessionTimerRemainingMs = undefined;
+      this.clearSessionTimer();
+      this.emitStatus({ message: 'Trainer disconnected', connected: false, controlling: false, running: false, paused: false });
     });
 
     await peripheral.connectAsync();
@@ -414,6 +454,29 @@ export class TrainerController extends EventEmitter {
     });
   }
 
+  private clearSessionTimer(): void {
+    if (this.sessionTimer) {
+      clearTimeout(this.sessionTimer);
+      this.sessionTimer = undefined;
+    }
+    this.sessionTimerStartedAt = undefined;
+  }
+
+  private scheduleSessionTimer(): void {
+    this.clearSessionTimer();
+    if (!this.sessionTimerRemainingMs || this.sessionTimerRemainingMs <= 0) {
+      this.sessionTimerRemainingMs = undefined;
+      return;
+    }
+    this.sessionTimerStartedAt = Date.now();
+    this.sessionTimer = setTimeout(() => {
+      this.sessionTimer = undefined;
+      this.sessionTimerRemainingMs = undefined;
+      this.sessionTimerStartedAt = undefined;
+      void this.stopSession();
+    }, this.sessionTimerRemainingMs);
+  }
+
   private emitStatus(partial: Partial<StatusPayload>): void {
     const payload: StatusPayload = {
       connected: Boolean(this.peripheral),
@@ -421,6 +484,7 @@ export class TrainerController extends EventEmitter {
       running: this.isRunning,
       scanning: false,
       message: partial.message,
+      paused: this.isPaused,
     };
 
     if (typeof partial.connected === 'boolean') {
@@ -434,6 +498,9 @@ export class TrainerController extends EventEmitter {
     }
     if (typeof partial.scanning === 'boolean') {
       payload.scanning = partial.scanning;
+    }
+    if (typeof partial.paused === 'boolean') {
+      payload.paused = partial.paused;
     }
 
     this.emit('status', payload);

@@ -19,7 +19,7 @@ const createWindow = async (): Promise<void> => {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: 'ERG Trainer POC',
+    title: 'Dans La Roue',
   });
 
   controller.on('telemetry', (payload: TelemetryPayload) => {
@@ -72,6 +72,16 @@ ipcMain.handle('trainer/start', async (_event, options: StartSessionOptions) => 
 
 ipcMain.handle('trainer/stop', async () => {
   await controller.stopSession();
+  return { ok: true };
+});
+
+ipcMain.handle('trainer/pause', async () => {
+  await controller.pauseSession();
+  return { ok: true };
+});
+
+ipcMain.handle('trainer/resume', async () => {
+  await controller.resumeSession();
   return { ok: true };
 });
 

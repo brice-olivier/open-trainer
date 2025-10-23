@@ -3,10 +3,11 @@
 Minimal Electron + TypeScript proof of concept that connects to a Bluetooth FTMS home trainer (for example an Elite Suito) and drives it in ERG mode. The UI lets you:
 
 - Connect to the first FTMS device in range (optionally filtered by name).
-- Start an ERG session for a target wattage and optional duration.
+- Build structured workouts block-by-block (X minutes at Y watts) before starting a session.
+- Start an ERG session (manual or structured) and monitor block/session progress on dedicated cards.
 - Stop the session at any time.
 - Nudge the target watts up/down without restarting.
-- Watch live telemetry for power, cadence, and speed.
+- Watch live telemetry for power, cadence, and speed alongside session/block averages.
 
 > **Important:** This repository is a proof of concept. Error handling is intentionally simple and the BLE stack relies on the experimental `@abandonware/noble` package. Use at your own risk and start with low watt targets when testing.
 
@@ -19,7 +20,7 @@ Minimal Electron + TypeScript proof of concept that connects to a Bluetooth FTMS
 ## Getting started
 
 ```bash
-cd erg-trainer-poc
+cd dans-la-roue
 npm install
 npm start
 ```

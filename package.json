@@ -1,5 +1,5 @@
 {
-  "name": "erg-trainer-poc",
+  "name": "dans-la-roue",
   "version": "0.1.0",
   "description": "Minimal Electron + TypeScript proof of concept to control an FTMS home trainer in ERG mode.",
   "main": "dist/main/main.js",

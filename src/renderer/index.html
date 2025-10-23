@@ -4,18 +4,12 @@
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ERG Trainer POC</title>
+    <title>Dans La Roue</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <main>
-      <header>
-        <h1>ERG Trainer POC</h1>
-        <p class="subtitle">Control an FTMS trainer in ERG mode.</p>
-      </header>
-
-      <section class="card">
-        <h2>Connection</h2>
+    <main class="dashboard">
+      <section class="card connection-card">
         <div class="status-row">
           <span id="connectionDot" class="status-dot offline"></span>
           <div>
@@ -30,28 +24,64 @@
         <button id="connect">Connect</button>
       </section>
 
-      <section class="card">
-        <h2>ERG Session</h2>
-        <div class="row">
-          <label for="targetWatts">Target Watts</label>
-          <input id="targetWatts" type="number" value="150" min="0" max="2500" step="5" />
+      <section class="card builder-card">
+        <h2>Session Builder</h2>
+        <div class="builder-form">
+          <div class="field">
+            <label for="blockDuration">Duration (minutes)</label>
+            <input id="blockDuration" type="number" min="0.1" step="0.1" value="5" />
+          </div>
+          <div class="field">
+            <label for="blockWatts">Target watts</label>
+            <input id="blockWatts" type="number" min="0" step="5" value="200" />
+          </div>
+          <div class="builder-actions">
+            <button id="addBlock">Add block</button>
+            <button id="clearBlocks" class="ghost">Clear</button>
+          </div>
         </div>
-        <div class="row">
-          <label for="duration">Duration (seconds)</label>
-          <input id="duration" type="number" value="0" min="0" step="30" />
+        <p class="builder-summary">Total duration: <span id="totalDuration">0:00</span></p>
+        <ul id="blockList" class="block-list">
+          <li class="placeholder">No blocks yet. Add blocks to build your session.</li>
+        </ul>
+      </section>
+
+      <section class="card control-card">
+        <h2>Session Control</h2>
+        <div class="control-status">
+          <p><strong>Current block:</strong> <span id="currentBlockLabel">—</span></p>
+          <p><strong>Time remaining:</strong> <span id="currentBlockRemaining">—</span></p>
         </div>
+        <div class="progress-group">
+          <label>Block progress</label>
+          <div class="progress-bar"><div id="blockProgress" class="progress"></div></div>
+          <label>Session progress</label>
+          <div class="progress-bar"><div id="sessionProgress" class="progress"></div></div>
+          <p class="progress-text">Session remaining: <span id="sessionRemaining">—</span></p>
+        </div>
+        <div class="target-row">
+          <div class="field">
+            <label for="targetWatts">Manual target (watts)</label>
+            <input id="targetWatts" type="number" value="150" min="0" max="2500" step="5" />
+          </div>
+          <div class="field">
+            <label for="duration">Manual duration (seconds)</label>
+            <input id="duration" type="number" value="0" min="0" step="30" />
+          </div>
+        </div>
+        <p class="target-summary">Current target: <span id="currentTarget">150 W</span></p>
         <div class="actions">
           <button id="start">Start</button>
+          <button id="pause" class="ghost">Pause</button>
           <button id="stop" class="danger">Stop</button>
         </div>
         <div class="actions secondary">
           <button id="decrease">-10 W</button>
-          <span id="currentTarget">Target: 0 W</span>
           <button id="increase">+10 W</button>
         </div>
       </section>
 
-      <section class="card">
+      <section class="card telemetry-card">
         <h2>Live Telemetry</h2>
         <div class="telemetry-grid">
           <div class="tile">
@@ -69,7 +99,37 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card metrics-card">
+        <h2>Performance Metrics</h2>
+        <div class="metrics-grid">
+          <div>
+            <h3>Session avg power</h3>
+            <p id="avgPower">—</p>
+          </div>
+          <div>
+            <h3>Session avg cadence</h3>
+            <p id="avgCadence">—</p>
+          </div>
+          <div>
+            <h3>Session avg speed</h3>
+            <p id="avgSpeed">—</p>
+          </div>
+          <div>
+            <h3>Block avg power</h3>
+            <p id="blockAvgPower">—</p>
+          </div>
+          <div>
+            <h3>Block avg cadence</h3>
+            <p id="blockAvgCadence">—</p>
+          </div>
+          <div>
+            <h3>Block avg speed</h3>
+            <p id="blockAvgSpeed">—</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card log-card">
         <h2>Activity Log</h2>
         <ul id="eventLog" class="event-log">
           <li class="placeholder">No events yet. Connect to your trainer to see updates.</li>

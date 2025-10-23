@@ -5,6 +5,8 @@ export interface ErgApi {
   connect: (options?: ConnectOptions) => Promise<void>;
   start: (options: StartSessionOptions) => Promise<void>;
   stop: () => Promise<void>;
+  pause: () => Promise<void>;
+  resume: () => Promise<void>;
   setTargetWatts: (watts: number) => Promise<void>;
   nudgeWatts: (delta: number) => Promise<number | undefined>;
   shutdown: () => Promise<void>;
@@ -32,6 +34,12 @@ const api: ErgApi = {
   },
   async stop() {
     await ipcRenderer.invoke('trainer/stop');
+  },
+  async pause() {
+    await ipcRenderer.invoke('trainer/pause');
+  },
+  async resume() {
+    await ipcRenderer.invoke('trainer/resume');
   },
   async setTargetWatts(watts: number) {
     await ipcRenderer.invoke('trainer/setTarget', watts);
