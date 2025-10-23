@@ -2,6 +2,7 @@
 
 ## Project Structure & Module Organization
 - `src/main/` runs the Electron main process and FTMS orchestration.
+- Device discovery and targeted connection logic lives in `src/main/trainerController.ts` (`startDiscovery`, `connect({ deviceId })`, `devices` events). Keep BLE scanning concerns there.
 - `src/preload/` defines the IPC surface exposed to the renderer—extend it rather than using Node APIs directly.
 - `src/renderer/` holds the dashboard (`index.html`, `renderer.ts`, `styles.css`); keep it browser-safe.
 - `src/types/` stores shared contracts. Build output lives in `dist/`; avoid manual edits.
@@ -18,9 +19,10 @@
 - Use two-space indentation, trailing commas on multi-line literals, and prefer `const` until reassignment is needed.
 - camelCase variables/functions, PascalCase types/interfaces, and kebab-case filenames (e.g. `trainer-controller.ts`).
 - Renderer code must stay sandboxed; route privileged work through the preload bridge.
+- Session Builder list items are draggable (HTML5 DnD). Preserve accessibility attributes and keep drag logic disabled while a structured session is active.
 
 ## Testing Guidelines
-- No automated suite yet; after `npm start` manually cover scanning, ERG control, session builder flow, and telemetry.
+- No automated suite yet; after `npm start` manually cover scanning/rescan, connect/disconnect, pause/resume, session builder (including drag reorder), and telemetry.
 - Future tests should live in `test/` or `src/__tests__/`, use the `*.spec.ts` suffix, and rely on the shared TypeScript config. Document manual checks in PRs.
 
 ## Commit & Pull Request Guidelines

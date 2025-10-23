@@ -1,26 +1,29 @@
-# ERG Trainer POC
+![App Screenshot](app-screenshot.png)
 
-Minimal Electron + TypeScript proof of concept that connects to a Bluetooth FTMS home trainer (for example an Elite Suito) and drives it in ERG mode. The UI lets you:
+# Open Trainer
 
-- Connect to the first FTMS device in range (optionally filtered by name).
-- Build structured workouts block-by-block (X minutes at Y watts) before starting a session.
-- Start an ERG session (manual or structured) and monitor block/session progress on dedicated cards.
+Minimalistic home trainer control app that connects to a Bluetooth FTMS home trainer (for example an Elite Suito) and drives it in ERG mode. The UI lets you:
+
+- Discover nearby FTMS trainers (and other BLE devices) with live signal strength and connect/disconnect per device.
+- Build structured workouts block-by-block (X minutes at Y watts) and reorder them with drag-and-drop before starting a session.
+- Start an ERG session (manual or structured), pause/resume, and monitor block/session progress on dedicated cards.
 - Stop the session at any time.
 - Nudge the target watts up/down without restarting.
 - Watch live telemetry for power, cadence, and speed alongside session/block averages.
 
-> **Important:** This repository is a proof of concept. Error handling is intentionally simple and the BLE stack relies on the experimental `@abandonware/noble` package. Use at your own risk and start with low watt targets when testing.
+> **Important:** This repository is a first draft. Code is untested, error handling is intentionally simple and the BLE stack relies on the experimental `@abandonware/noble` package. Use at your own risk and start with low watt targets when testing.
 
 ## Prerequisites
 
-- macOS with Bluetooth Low Energy hardware (the Mac mini M4 works out of the box).
-- [Node.js 20+](https://nodejs.org/en/download) installed (`brew install node` is the quickest path on macOS).
+- Bluetooth Low Energy hardware (tested on Mac Mini M4).
 - Permissions to use Bluetooth (grant the app access when macOS prompts).
+- A home trainer OFC (tested on Elite Suito).
+- [Node.js 20+](https://nodejs.org/en/download) installed (`brew install node` is the quickest path on macOS).
 
 ## Getting started
 
 ```bash
-cd dans-la-roue
+cd open-trainer
 npm install
 npm start
 ```
@@ -39,19 +42,18 @@ This runs TypeScript in watch mode, copies renderer assets on change, and relaun
 
 ## Usage notes
 
-1. **Connect:** Optionally enter part of your trainer’s Bluetooth name (e.g. “suito”) and click **Connect**. The app scans for FTMS devices for up to 20 seconds.
-2. **Start:** Adjust the desired watts and optional duration (seconds). Press **Start** to send the request-control, target-power, and start commands.
-3. **Adjust:** Use **+10 W** / **–10 W** to nudge the current target without interrupting the session.
-4. **Stop:** Hit **Stop** to send the FTMS stop/pause opcode. The trainer should fall back to freewheel mode.
-5. **Review:** The Activity Log card records connection and control events for quick troubleshooting.
+1. **Connect:** Click **Rescan** (or wait a second after launch) to populate the _Nearby devices_ list, then use the **Connect** button next to your trainer. Non-trainer peripherals are shown as “Unavailable” for now.
+2. **Build:** Create blocks in the Session Builder, drag them to adjust order, and review the total duration.
+3. **Start:** Adjust the desired watts and optional duration (seconds). Press **Start** to send the request-control, target-power, and start commands.
+4. **Control:** Use **Pause** / **Resume**, **Stop**, and **±10 W** nudges as needed during the workout.
+5. **Review:** The Activity Log card records discovery, connection, and control events for quick troubleshooting.
 
 Telemetry updates appear in the **Live Telemetry** card. All power values are capped between 0 W and 2500 W for safety.
 
 ## Known limitations
 
 - No ANT+ FE‑C support—BLE FTMS only.
-- No persistence of preferred trainer or last target watt.
-- BLE reconnection logic is minimal; if the trainer drops out you may need to relaunch.
-- This environment did not have Node.js available during authoring, so the code is untested locally. Run `npm start` after installing dependencies to verify everything on your machine.
+- Nearby discovery lists heart-rate monitors, but only FTMS trainers can be controlled for now.
+- Tested on macOS 26.0.1 with Elite Suito 
 
-Contributions, bug reports, and enhancements are welcome. Start by exploring `src/main/trainerController.ts` to adjust FTMS behaviour or extend telemetry parsing.
+Contributions, bug reports, and enhancements are welcome.
