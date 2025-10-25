@@ -11,6 +11,8 @@ interface MetricStats {
   cadenceSamples: number;
   speedSum: number;
   speedSamples: number;
+  heartRateSum: number;
+  heartRateSamples: number;
 }
 
 interface DiscoveredDevice {
@@ -33,6 +35,8 @@ const createMetricStats = (): MetricStats => ({
   cadenceSamples: 0,
   speedSum: 0,
   speedSamples: 0,
+  heartRateSum: 0,
+  heartRateSamples: 0,
 });
 
 const rescanDevicesButton = document.getElementById('rescanDevices') as HTMLButtonElement | null;
@@ -66,13 +70,16 @@ const currentTargetLabel = document.getElementById('currentTarget') as HTMLSpanE
 const telemetryPower = document.getElementById('telemetryPower') as HTMLParagraphElement | null;
 const telemetryCadence = document.getElementById('telemetryCadence') as HTMLParagraphElement | null;
 const telemetrySpeed = document.getElementById('telemetrySpeed') as HTMLParagraphElement | null;
+const telemetryHeartRate = document.getElementById('telemetryHeartRate') as HTMLParagraphElement | null;
 
 const avgPowerElem = document.getElementById('avgPower') as HTMLParagraphElement | null;
 const avgCadenceElem = document.getElementById('avgCadence') as HTMLParagraphElement | null;
 const avgSpeedElem = document.getElementById('avgSpeed') as HTMLParagraphElement | null;
+const avgHeartRateElem = document.getElementById('avgHeartRate') as HTMLParagraphElement | null;
 const blockAvgPowerElem = document.getElementById('blockAvgPower') as HTMLParagraphElement | null;
 const blockAvgCadenceElem = document.getElementById('blockAvgCadence') as HTMLParagraphElement | null;
 const blockAvgSpeedElem = document.getElementById('blockAvgSpeed') as HTMLParagraphElement | null;
+const blockAvgHeartRateElem = document.getElementById('blockAvgHeartRate') as HTMLParagraphElement | null;
 
 const eventLog = document.getElementById('eventLog') as HTMLUListElement | null;
 
@@ -176,6 +183,8 @@ const resetStats = (): void => {
   overallStats.cadenceSamples = 0;
   overallStats.speedSum = 0;
   overallStats.speedSamples = 0;
+  overallStats.heartRateSum = 0;
+  overallStats.heartRateSamples = 0;
   blockStats = blocks.map(() => createMetricStats());
   updateMetricsDisplay();
 };
@@ -190,16 +199,19 @@ const updateMetricsDisplay = (): void => {
   if (avgPowerElem) avgPowerElem.textContent = formatAvg(overallStats.powerSum, overallStats.powerSamples, 'W');
   if (avgCadenceElem) avgCadenceElem.textContent = formatAvg(overallStats.cadenceSum, overallStats.cadenceSamples, 'rpm');
   if (avgSpeedElem) avgSpeedElem.textContent = formatAvg(overallStats.speedSum, overallStats.speedSamples, 'km/h', 1);
+  if (avgHeartRateElem) avgHeartRateElem.textContent = formatAvg(overallStats.heartRateSum, overallStats.heartRateSamples, 'bpm');
 
   if (structuredSession && currentBlockIndex >= 0 && blockStats[currentBlockIndex]) {
     const stats = blockStats[currentBlockIndex];
     if (blockAvgPowerElem) blockAvgPowerElem.textContent = formatAvg(stats.powerSum, stats.powerSamples, 'W');
     if (blockAvgCadenceElem) blockAvgCadenceElem.textContent = formatAvg(stats.cadenceSum, stats.cadenceSamples, 'rpm');
     if (blockAvgSpeedElem) blockAvgSpeedElem.textContent = formatAvg(stats.speedSum, stats.speedSamples, 'km/h', 1);
+    if (blockAvgHeartRateElem) blockAvgHeartRateElem.textContent = formatAvg(stats.heartRateSum, stats.heartRateSamples, 'bpm');
   } else {
     if (blockAvgPowerElem) blockAvgPowerElem.textContent = '—';
     if (blockAvgCadenceElem) blockAvgCadenceElem.textContent = '—';
     if (blockAvgSpeedElem) blockAvgSpeedElem.textContent = '—';
+    if (blockAvgHeartRateElem) blockAvgHeartRateElem.textContent = '—';
   }
 };
 
@@ -351,9 +363,10 @@ const renderDeviceList = (): void => {
 
     const action = document.createElement('button');
     action.type = 'button';
-    const supportsConnect = device.kind === 'trainer';
+    const supportsConnect = device.kind === 'trainer' || device.kind === 'heart-rate';
     action.className = isConnected ? 'danger small device-action' : 'small device-action';
     action.dataset.deviceId = device.id;
+    action.dataset.deviceKind = device.kind;
     if (supportsConnect || isConnected) {
       action.dataset.deviceAction = isConnected ? 'disconnect' : 'connect';
       action.textContent = isConnected ? 'Disconnect' : 'Connect';
@@ -701,42 +714,75 @@ deviceListElement?.addEventListener('click', async (event) => {
   const device = discoveredDevices.find((entry) => entry.id === deviceId);
   const friendlyLabel = device?.label ?? deviceId;
   const originalText = target.textContent ?? '';
+  const deviceKind = (target.dataset.deviceKind as DiscoveredDevice['kind'] | undefined) ?? device?.kind;
+  const isHeartRate = deviceKind === 'heart-rate';
 
   target.disabled = true;
 
   if (action === 'connect') {
-    target.textContent = 'Connecting…';
-    setConnectionState('Scanning', 'scanning');
-    setStatus(`Connecting to ${friendlyLabel}…`);
-    appendLog(`Connecting to ${friendlyLabel}`);
+    target.textContent = isHeartRate ? 'Pairing…' : 'Connecting…';
+    if (!isHeartRate) {
+      setConnectionState('Scanning', 'scanning');
+      setStatus(`Connecting to ${friendlyLabel}…`);
+      appendLog(`Connecting to ${friendlyLabel}`);
+    } else {
+      setStatus(`Connecting to heart rate monitor (${friendlyLabel})…`);
+      appendLog(`Connecting to heart rate monitor (${friendlyLabel})`);
+    }
     try {
-      const connectionLabel = await window.ergApi.connect({ deviceId });
+      const connectionLabel = await window.ergApi.connect({ deviceId, deviceKind: isHeartRate ? 'heart-rate' : 'trainer' });
       const labelText = (connectionLabel && connectionLabel.trim()) || friendlyLabel;
-      setStatus(`Connected. Control acquired (${labelText}).`);
-      setConnectionState('Connected', 'connected');
-      appendLog(`Connected to trainer (${labelText})`);
+      if (isHeartRate) {
+        setStatus(`Heart rate connected (${labelText}).`);
+        appendLog(`Connected to heart rate monitor (${labelText})`);
+      } else {
+        setStatus(`Connected. Control acquired (${labelText}).`);
+        setConnectionState('Connected', 'connected');
+        appendLog(`Connected to trainer (${labelText})`);
+      }
       deviceScanning = true;
       renderDeviceList();
       await window.ergApi.startDiscovery().catch(() => undefined);
     } catch (error) {
       console.error(error);
-      setStatus(`Failed to connect: ${(error as Error).message}`);
-      setConnectionState('Idle', 'idle');
-      appendLog(`Connection failed: ${(error as Error).message}`);
+      const message = (error as Error).message;
+      if (isHeartRate) {
+        setStatus(`Failed to connect heart rate monitor: ${message}`);
+        appendLog(`Heart rate connection failed: ${message}`);
+      } else {
+        setStatus(`Failed to connect: ${message}`);
+        setConnectionState('Idle', 'idle');
+        appendLog(`Connection failed: ${message}`);
+      }
     }
   } else if (action === 'disconnect') {
     target.textContent = 'Disconnecting…';
-    setStatus('Disconnecting…');
-    appendLog('Disconnecting from trainer');
+    if (isHeartRate) {
+      setStatus('Disconnecting heart rate monitor…');
+      appendLog('Disconnecting from heart rate monitor');
+    } else {
+      setStatus('Disconnecting…');
+      appendLog('Disconnecting from trainer');
+    }
     try {
-      await window.ergApi.disconnect();
+      if (isHeartRate) {
+        await window.ergApi.disconnect({ deviceId, deviceKind: 'heart-rate' });
+      } else {
+        await window.ergApi.disconnect();
+      }
       deviceScanning = true;
       renderDeviceList();
       await window.ergApi.startDiscovery().catch(() => undefined);
     } catch (error) {
       console.error(error);
-      setStatus(`Failed to disconnect: ${(error as Error).message}`);
-      appendLog(`Failed to disconnect: ${(error as Error).message}`);
+      const message = (error as Error).message;
+      if (isHeartRate) {
+        setStatus(`Failed to disconnect heart rate monitor: ${message}`);
+        appendLog(`Failed to disconnect heart rate monitor: ${message}`);
+      } else {
+        setStatus(`Failed to disconnect: ${message}`);
+        appendLog(`Failed to disconnect: ${message}`);
+      }
     }
   }
 
@@ -912,17 +958,24 @@ decreaseButton?.addEventListener('click', async () => {
 
 window.ergApi.onDevices((devices) => {
   discoveredDevices = devices;
-  const active = devices.find((device) => device.connected);
-  if (active) {
-    connectedDeviceId = active.id;
-  }
+  const activeTrainer = devices.find((device) => device.connected && device.kind === 'trainer');
+  connectedDeviceId = activeTrainer ? activeTrainer.id : null;
   renderDeviceList();
 });
 
 window.ergApi.onTelemetry((telemetry) => {
-  if (telemetryPower) telemetryPower.textContent = formatNumber(telemetry.powerWatts, ' W');
-  if (telemetryCadence) telemetryCadence.textContent = formatNumber(telemetry.cadenceRpm, ' rpm');
-  if (telemetrySpeed) telemetrySpeed.textContent = formatNumber(telemetry.speedKph, ' km/h');
+  if (telemetryPower && typeof telemetry.powerWatts === 'number') {
+    telemetryPower.textContent = formatNumber(telemetry.powerWatts, ' W');
+  }
+  if (telemetryCadence && typeof telemetry.cadenceRpm === 'number') {
+    telemetryCadence.textContent = formatNumber(telemetry.cadenceRpm, ' rpm');
+  }
+  if (telemetrySpeed && typeof telemetry.speedKph === 'number') {
+    telemetrySpeed.textContent = formatNumber(telemetry.speedKph, ' km/h');
+  }
+  if (telemetryHeartRate && typeof telemetry.heartRateBpm === 'number') {
+    telemetryHeartRate.textContent = formatNumber(telemetry.heartRateBpm, ' bpm');
+  }
 
   if (typeof telemetry.powerWatts === 'number') {
     overallStats.powerSum += telemetry.powerWatts;
@@ -949,6 +1002,15 @@ window.ergApi.onTelemetry((telemetry) => {
       const stats = blockStats[currentBlockIndex];
       stats.speedSum += telemetry.speedKph;
       stats.speedSamples += 1;
+    }
+  }
+  if (typeof telemetry.heartRateBpm === 'number') {
+    overallStats.heartRateSum += telemetry.heartRateBpm;
+    overallStats.heartRateSamples += 1;
+    if (structuredSession && sessionActive && currentBlockIndex >= 0 && blockStats[currentBlockIndex]) {
+      const stats = blockStats[currentBlockIndex];
+      stats.heartRateSum += telemetry.heartRateBpm;
+      stats.heartRateSamples += 1;
     }
   }
 

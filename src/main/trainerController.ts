@@ -8,6 +8,7 @@ export interface ConnectOptions {
   deviceName?: string;
   timeoutMs?: number;
   deviceId?: string;
+  deviceKind?: 'trainer' | 'heart-rate';
 }
 
 export interface StartSessionOptions {
@@ -15,10 +16,16 @@ export interface StartSessionOptions {
   durationSeconds?: number;
 }
 
+export interface DisconnectOptions {
+  deviceId?: string;
+  deviceKind?: 'trainer' | 'heart-rate';
+}
+
 export interface TelemetryPayload {
   speedKph?: number;
   cadenceRpm?: number;
   powerWatts?: number;
+  heartRateBpm?: number;
 }
 
 export interface StatusPayload {
@@ -36,6 +43,7 @@ const FTMS_CONTROL_POINT_UUID = '2ad9';
 const FTMS_INDOOR_BIKE_UUID = '2ad2';
 const FTMS_STATUS_UUID = '2ada';
 const HEART_RATE_SERVICE_UUID = '180d';
+const HEART_RATE_MEASUREMENT_UUID = '2a37';
 const DEVICE_STALE_MS = 15000;
 
 const FTMS_REQUEST_CONTROL = 0x00;
@@ -107,6 +115,10 @@ export class TrainerController extends EventEmitter {
 
   private statusCharacteristic?: Characteristic;
 
+  private heartRatePeripheral?: Peripheral;
+
+  private heartRateCharacteristic?: Characteristic;
+
   private isControlling = false;
 
   private isRunning = false;
@@ -125,6 +137,8 @@ export class TrainerController extends EventEmitter {
 
   private connectedDeviceId?: string;
 
+  private connectedHeartRateId?: string;
+
   private readonly discoveredPeripherals = new Map<string, Peripheral>();
 
   private readonly discoveredDevices = new Map<string, DiscoveredDevice>();
@@ -134,6 +148,11 @@ export class TrainerController extends EventEmitter {
   private readonly handleDiscoverBound = this.handleDiscover.bind(this);
 
   async connect(options: ConnectOptions = {}): Promise<string | undefined> {
+    const kind = this.resolveDeviceKind(options.deviceId, options.deviceKind);
+    if (kind === 'heart-rate') {
+      return this.connectHeartRate(options);
+    }
+
     if (this.peripheral) {
       this.emitStatus({ message: 'Trainer already connected' });
       return this.connectedDeviceLabel;
@@ -173,6 +192,39 @@ export class TrainerController extends EventEmitter {
     return this.connectedDeviceLabel;
   }
 
+  private async connectHeartRate(options: ConnectOptions): Promise<string | undefined> {
+    if (this.heartRatePeripheral && this.connectedHeartRateId) {
+      return this.discoveredDevices.get(this.connectedHeartRateId)?.label;
+    }
+
+    const { deviceId } = options;
+    if (!deviceId) {
+      throw new Error('Heart rate monitor deviceId is required');
+    }
+    const peripheral = this.discoveredPeripherals.get(deviceId);
+    if (!peripheral) {
+      throw new Error('Heart rate monitor not found');
+    }
+
+    await this.stopDiscovery().catch(() => undefined);
+    await this.bindHeartRatePeripheral(peripheral);
+    return this.discoveredDevices.get(deviceId)?.label ?? TrainerController.buildDeviceLabel(peripheral);
+  }
+
+  private async disconnectHeartRate(): Promise<void> {
+    if (!this.heartRatePeripheral) {
+      return;
+    }
+    const peripheral = this.heartRatePeripheral;
+    try {
+      if (peripheral.state === 'connected' || peripheral.state === 'connecting') {
+        await peripheral.disconnectAsync();
+      }
+    } catch (error) {
+      // ignore disconnect errors
+    }
+  }
+
   async startDiscovery(): Promise<void> {
     if (this.discovering) {
       this.emitDevices();
@@ -182,7 +234,7 @@ export class TrainerController extends EventEmitter {
     const begin = async (): Promise<void> => {
       this.discovering = true;
       for (const id of [...this.discoveredDevices.keys()]) {
-        if (id !== this.connectedDeviceId) {
+        if (id !== this.connectedDeviceId && id !== this.connectedHeartRateId) {
           this.discoveredDevices.delete(id);
           this.discoveredPeripherals.delete(id);
         }
@@ -261,7 +313,13 @@ export class TrainerController extends EventEmitter {
     this.emitStatus({ message: 'ERG session stopped', running: false, controlling: this.isControlling, paused: false });
   }
 
-  async disconnect(): Promise<void> {
+  async disconnect(options: DisconnectOptions = {}): Promise<void> {
+    const kind = this.resolveDeviceKind(options.deviceId, options.deviceKind);
+    if (kind === 'heart-rate') {
+      await this.disconnectHeartRate();
+      return;
+    }
+
     if (!this.peripheral) {
       return;
     }
@@ -346,6 +404,7 @@ export class TrainerController extends EventEmitter {
         // ignore errors during shutdown
       }
     }
+    await this.disconnect({ deviceKind: 'heart-rate' }).catch(() => undefined);
     await this.disconnect();
     this.isControlling = false;
     this.isRunning = false;
@@ -356,6 +415,9 @@ export class TrainerController extends EventEmitter {
     }
     this.discoveredPeripherals.clear();
     this.discoveredDevices.clear();
+    this.heartRatePeripheral = undefined;
+    this.heartRateCharacteristic = undefined;
+    this.connectedHeartRateId = undefined;
     this.emitDevices();
   }
 
@@ -486,6 +548,49 @@ export class TrainerController extends EventEmitter {
     this.emitDevices();
   }
 
+  private async bindHeartRatePeripheral(peripheral: Peripheral): Promise<void> {
+    const id = this.getPeripheralId(peripheral);
+    this.discoveredPeripherals.set(id, peripheral);
+    this.handleDiscover(peripheral);
+
+    await peripheral.connectAsync();
+
+    const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
+      [HEART_RATE_SERVICE_UUID],
+      [HEART_RATE_MEASUREMENT_UUID],
+    );
+
+    const measurement = characteristics.find(
+      (characteristic) => characteristic.uuid.toLowerCase() === HEART_RATE_MEASUREMENT_UUID,
+    );
+
+    if (!measurement) {
+      await peripheral.disconnectAsync().catch(() => undefined);
+      throw new Error('Heart rate monitor does not expose required characteristics');
+    }
+
+    this.heartRatePeripheral = peripheral;
+    this.heartRateCharacteristic = measurement;
+    this.connectedHeartRateId = id;
+
+    peripheral.once('disconnect', () => {
+      this.heartRatePeripheral = undefined;
+      this.heartRateCharacteristic = undefined;
+      const disconnectedId = this.connectedHeartRateId;
+      this.connectedHeartRateId = undefined;
+      this.emitDevices();
+      const label = disconnectedId ? this.discoveredDevices.get(disconnectedId)?.label : undefined;
+      const message = label ? `Heart rate monitor disconnected (${label})` : 'Heart rate monitor disconnected';
+      this.emitStatus({ message });
+    });
+
+    await this.subscribe(measurement, this.handleHeartRateNotification);
+    this.emitDevices();
+    const label = this.discoveredDevices.get(id)?.label ?? TrainerController.buildDeviceLabel(peripheral);
+    const message = `Heart rate monitor connected${label ? ` (${label})` : ''}`;
+    this.emitStatus({ message });
+  }
+
   private async subscribe(characteristic: Characteristic, listener: (data: Buffer) => void): Promise<void> {
     characteristic.removeAllListeners('data');
     characteristic.on('data', (data: Buffer) => listener.call(this, data));
@@ -562,7 +667,8 @@ export class TrainerController extends EventEmitter {
       offset += 5;
     }
 
-    if (flags & FTMS_FLAG_HEART_RATE_PRESENT) {
+    if (flags & FTMS_FLAG_HEART_RATE_PRESENT && offset < data.length) {
+      telemetry.heartRateBpm = data.readUInt8(offset);
       offset += 1;
     }
 
@@ -579,6 +685,29 @@ export class TrainerController extends EventEmitter {
     }
 
     this.emit('telemetry', telemetry);
+  }
+
+  private handleHeartRateNotification(data: Buffer): void {
+    if (!data.length) {
+      return;
+    }
+    const flags = data.readUInt8(0);
+    let offset = 1;
+
+    let heartRate: number | undefined;
+    if (flags & 0x01) {
+      if (data.length >= offset + 2) {
+        heartRate = data.readUInt16LE(offset);
+        offset += 2;
+      }
+    } else if (data.length >= offset + 1) {
+      heartRate = data.readUInt8(offset);
+      offset += 1;
+    }
+
+    if (typeof heartRate === 'number' && Number.isFinite(heartRate)) {
+      this.emit('telemetry', { heartRateBpm: heartRate });
+    }
   }
 
   private handleControlPointNotification(data: Buffer): void {
@@ -627,6 +756,25 @@ export class TrainerController extends EventEmitter {
     });
   }
 
+  private resolveDeviceKind(deviceId?: string, explicitKind?: 'trainer' | 'heart-rate'): 'trainer' | 'heart-rate' {
+    if (explicitKind) {
+      return explicitKind;
+    }
+    if (deviceId) {
+      if (deviceId === this.connectedHeartRateId) {
+        return 'heart-rate';
+      }
+      const known = this.discoveredDevices.get(deviceId);
+      if (known?.kind === 'heart-rate') {
+        return 'heart-rate';
+      }
+      if (known?.kind === 'trainer') {
+        return 'trainer';
+      }
+    }
+    return 'trainer';
+  }
+
   private getPeripheralId(peripheral: Peripheral): string {
     return peripheral.id ?? peripheral.uuid;
   }
@@ -656,7 +804,7 @@ export class TrainerController extends EventEmitter {
       rssi: typeof peripheral.rssi === 'number' ? peripheral.rssi : undefined,
       kind,
       connectable: peripheral.connectable ?? true,
-      connected: id === this.connectedDeviceId,
+      connected: id === this.connectedDeviceId || id === this.connectedHeartRateId,
       lastSeen: Date.now(),
     };
 
@@ -667,7 +815,7 @@ export class TrainerController extends EventEmitter {
   private emitDevices(): void {
     const now = Date.now();
     for (const [id, device] of [...this.discoveredDevices.entries()]) {
-      if (id !== this.connectedDeviceId && now - device.lastSeen > DEVICE_STALE_MS) {
+      if (id !== this.connectedDeviceId && id !== this.connectedHeartRateId && now - device.lastSeen > DEVICE_STALE_MS) {
         this.discoveredDevices.delete(id);
       }
     }
@@ -675,7 +823,7 @@ export class TrainerController extends EventEmitter {
     const devices = Array.from(this.discoveredDevices.values())
       .map((device) => ({
         ...device,
-        connected: device.id === this.connectedDeviceId,
+        connected: device.id === this.connectedDeviceId || device.id === this.connectedHeartRateId,
       }))
       .sort((a, b) => {
         if (a.connected !== b.connected) return a.connected ? -1 : 1;

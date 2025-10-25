@@ -1,9 +1,9 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import { ConnectOptions, StartSessionOptions, TelemetryPayload, StatusPayload, DiscoveredDevice } from '../main/trainerController';
+import { ConnectOptions, StartSessionOptions, TelemetryPayload, StatusPayload, DiscoveredDevice, DisconnectOptions } from '../main/trainerController';
 
 export interface ErgApi {
   connect: (options?: ConnectOptions) => Promise<string | undefined>;
-  disconnect: () => Promise<void>;
+  disconnect: (options?: DisconnectOptions) => Promise<void>;
   start: (options: StartSessionOptions) => Promise<void>;
   stop: () => Promise<void>;
   pause: () => Promise<void>;
@@ -34,8 +34,8 @@ const api: ErgApi = {
     const response = await ipcRenderer.invoke('trainer/connect', options ?? {});
     return response?.label as string | undefined;
   },
-  async disconnect() {
-    await ipcRenderer.invoke('trainer/disconnect');
+  async disconnect(options?: DisconnectOptions) {
+    await ipcRenderer.invoke('trainer/disconnect', options ?? {});
   },
   async start(options: StartSessionOptions) {
     await ipcRenderer.invoke('trainer/start', options);

@@ -6,6 +6,7 @@ import TrainerController, {
   TelemetryPayload,
   StatusPayload,
   DiscoveredDevice,
+  DisconnectOptions,
 } from './trainerController';
 
 let mainWindow: BrowserWindow | null = null;
@@ -70,8 +71,8 @@ ipcMain.handle('trainer/connect', async (_event, options: ConnectOptions) => {
   return { ok: true, label };
 });
 
-ipcMain.handle('trainer/disconnect', async () => {
-  await controller.disconnect();
+ipcMain.handle('trainer/disconnect', async (_event, options: DisconnectOptions = {}) => {
+  await controller.disconnect(options);
   return { ok: true };
 });
 
